@@ -364,19 +364,16 @@ def _get_json(url: str, headers: dict[str, str], *, timeout: float) -> dict:
 
 
 def _usage_windows(
-    source: dict, mapping: tuple[tuple[str, str], ...], used_key: str, reset_key: str, *, fraction: bool = False
+    source: dict, mapping: tuple[tuple[str, str], ...], used_key: str, reset_key: str
 ) -> list[AccountUsageWindow]:
-    """Build windows from ``source[key][used_key]``; ``fraction`` scales values <= 1 to percent."""
+    """Build windows from ``source[key][used_key]``, already a 0-100 percent."""
     windows: list[AccountUsageWindow] = []
     for key, label in mapping:
         window = source.get(key) or {}
         used = window.get(used_key)
         if used is None:
             continue
-        used = float(used)
-        if fraction and used <= 1:
-            used *= 100
-        windows.append(AccountUsageWindow(label=label, used_percent=used, reset_at=_parse_dt(window.get(reset_key))))
+        windows.append(AccountUsageWindow(label=label, used_percent=float(used), reset_at=_parse_dt(window.get(reset_key))))
     return windows
 
 
@@ -554,7 +551,7 @@ def _fetch_anthropic_account_usage(
     payload = _get_json("https://api.anthropic.com/api/oauth/usage", headers, timeout=15.0)
     windows = _usage_windows(
         payload, (("five_hour", "Current session"), ("seven_day", "Current week"), ("seven_day_opus", "Opus week"),
-                  ("seven_day_sonnet", "Sonnet week")), "utilization", "resets_at", fraction=True,
+                  ("seven_day_sonnet", "Sonnet week")), "utilization", "resets_at",
     )
     details: list[str] = []
     extra = payload.get("extra_usage") or {}
