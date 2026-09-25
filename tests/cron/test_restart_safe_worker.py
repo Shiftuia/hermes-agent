@@ -648,6 +648,48 @@ def test_launch_external_worker_pin_extends_the_sanitized_env_not_os_environ(
     assert "PYTHONPATH" not in worker_env_mod.pin_hermes_tree_on_pythonpath({}, repo_root)
 
 
+def test_pin_hermes_tree_also_pins_selected_dependency_site_packages(tmp_path, monkeypatch):
+    """A managed-systemd gateway runs the worker on the bundled interpreter, which has no
+    site-packages of its own (#114xxx: ``ModuleNotFoundError: No module named 'ruamel'``).
+    The pin must add the currently-selected dependency environment's site-packages too, the
+    same one ``pm.environments.activate_dependencies`` would select for a normal launch —
+    not a hardcoded path, so it survives the next ``hermes update`` picking a new generation.
+    """
+    import cron.scheduler_worker_env as worker_env_mod
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    site_packages = tmp_path / "installs" / "abc123" / "environments" / "def456" / "venv" / "lib" / "python3.14" / "site-packages"
+    site_packages.mkdir(parents=True)
+    monkeypatch.setattr(worker_env_mod, "_installed_purelib", lambda: None)
+    monkeypatch.setattr(
+        "pm.environments.selected_venv", lambda root: site_packages.parent.parent)
+    monkeypatch.setattr("pm.environments.site_packages", lambda venv: site_packages)
+
+    env = worker_env_mod.pin_hermes_tree_on_pythonpath({}, repo_root)
+
+    entries = env["PYTHONPATH"].split(os.pathsep)
+    assert entries == [str(repo_root), str(site_packages)]
+
+
+def test_pin_hermes_tree_skips_missing_or_unresolvable_dependency_environment(tmp_path, monkeypatch):
+    """No selected environment (fresh checkout, resolution error) must degrade to the
+    pre-existing repo-root-only pin, never raise and never block the worker launch."""
+    import cron.scheduler_worker_env as worker_env_mod
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setattr(worker_env_mod, "_installed_purelib", lambda: None)
+    monkeypatch.setattr(
+        "pm.environments.selected_venv",
+        lambda root: (_ for _ in ()).throw(RuntimeError("no install")),
+    )
+
+    env = worker_env_mod.pin_hermes_tree_on_pythonpath({}, repo_root)
+
+    assert env["PYTHONPATH"] == str(repo_root)
+
+
 def test_shared_run_path_hands_gateway_fire_to_external_worker(monkeypatch):
     import cron.scheduler as scheduler
 
